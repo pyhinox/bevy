@@ -63,7 +63,6 @@ use bevy_ptr::UnsafeCellDeref;
 
 use core::panic::Location;
 use unsafe_world_cell::{UnsafeEntityCell, UnsafeWorldCell};
-use crate::storage::Changes;
 
 /// A [`World`] mutation.
 ///
@@ -134,14 +133,6 @@ pub struct World {
     pub(crate) last_check_tick: Tick,
     pub(crate) last_trigger_id: u32,
     pub(crate) command_queue: RawCommandQueue,
-}
-
-impl World {
-
-    /// Just For Test
-    pub fn test(&mut self) -> &mut Changes {
-        &mut self.storages.changes
-    }
 }
 
 impl Default for World {

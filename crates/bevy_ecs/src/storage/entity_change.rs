@@ -53,3 +53,28 @@ impl EntityChange {
         self.component
     }
 }
+
+mod tests {
+    #![allow(unused_imports)]
+    use crate::component::ComponentId;
+    use crate::entity::Entity;
+    use crate::storage::{Changes, EntityChange};
+
+    #[test]
+    fn changes() {
+        let mut storage = Changes::new();
+        let entity = Entity::PLACEHOLDER;
+        let component = ComponentId::new(1);
+        storage.push(EntityChange::new(entity, component));
+        storage.push(EntityChange::new(entity, component));
+
+        let changes = storage.take_all();
+        assert_eq!(changes.len(), 2);
+        assert_eq!(storage.take_all().len(), 0);
+
+        changes.iter().for_each(|change| {
+            assert_eq!(change.component, component);
+            assert_eq!(change.entity, entity);
+        })
+    }
+}
