@@ -21,6 +21,7 @@ use bevy_ptr::Ptr;
 #[cfg(feature = "track_change_detection")]
 use bevy_ptr::UnsafeCellDeref;
 use core::{any::TypeId, cell::UnsafeCell, fmt::Debug, marker::PhantomData, ptr};
+use crate::storage::EntityChange;
 
 /// Variant of the [`World`] where resource and component accesses take `&self`, and the responsibility to avoid
 /// aliasing violations are given to the caller instead of being checked at compile-time by rust's unique XOR shared rule.
@@ -873,6 +874,10 @@ impl<'w> UnsafeEntityCell<'w> {
                 self.location,
             )
             .map(|(value, cells, _caller)| Mut {
+                on_change: Some((
+                    EntityChange::new(self.entity, component_id),
+                    &self.world.storages().changes,
+                )),
                 // SAFETY: returned component is of type T
                 value: value.assert_unique().deref_mut::<T>(),
                 ticks: TicksMut::from_tick_cells(cells, last_change_tick, change_tick),

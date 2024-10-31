@@ -62,8 +62,8 @@ use core::{
 use bevy_ptr::UnsafeCellDeref;
 
 use core::panic::Location;
-
 use unsafe_world_cell::{UnsafeEntityCell, UnsafeWorldCell};
+use crate::storage::Changes;
 
 /// A [`World`] mutation.
 ///
@@ -136,6 +136,14 @@ pub struct World {
     pub(crate) command_queue: RawCommandQueue,
 }
 
+impl World {
+
+    /// Just For Test
+    pub fn test(&mut self) -> &mut Changes {
+        &mut self.storages.changes
+    }
+}
+
 impl Default for World {
     fn default() -> Self {
         let mut world = Self {
@@ -182,6 +190,7 @@ impl World {
         assert_eq!(ON_INSERT, self.register_component::<OnInsert>());
         assert_eq!(ON_REPLACE, self.register_component::<OnReplace>());
         assert_eq!(ON_REMOVE, self.register_component::<OnRemove>());
+        assert_eq!(ON_MUTATE, self.register_component::<OnMutate>());
     }
     /// Creates a new empty [`World`].
     ///
@@ -2811,6 +2820,7 @@ impl World {
         // SAFETY: `ptr` was obtained from the TypeId of `R`.
         let mut value = unsafe { ptr.read::<R>() };
         let value_mut = Mut {
+            on_change: None,
             value: &mut value,
             ticks: TicksMut {
                 added: &mut ticks.added,
@@ -3204,6 +3214,7 @@ impl World {
             ref mut sparse_sets,
             ref mut resources,
             ref mut non_send_resources,
+            ..
         } = self.storages;
 
         #[cfg(feature = "trace")]

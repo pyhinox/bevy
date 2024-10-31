@@ -26,14 +26,18 @@ mod resource;
 mod sparse_set;
 mod table;
 mod thin_array_ptr;
+mod entity_change;
 
 pub use resource::*;
 pub use sparse_set::*;
 pub use table::*;
+pub use entity_change::*;
 
 /// The raw data stores of a [`World`](crate::world::World)
 #[derive(Default)]
 pub struct Storages {
+    /// Backing storage for EntityChange
+    pub changes: Changes,
     /// Backing storage for [`SparseSet`] components.
     pub sparse_sets: SparseSets,
     /// Backing storage for [`Table`] components.

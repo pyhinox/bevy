@@ -15,6 +15,7 @@ use {
     bevy_ptr::ThinSlicePtr,
     core::{cell::UnsafeCell, panic::Location},
 };
+use crate::storage::{Changes, EntityChange};
 
 /// The (arbitrarily chosen) minimum number of world tick increments between `check_tick` scans.
 ///
@@ -387,6 +388,7 @@ macro_rules! impl_methods {
             /// <T>`, but you need a `Mut<T>`.
             pub fn reborrow(&mut self) -> Mut<'_, $target> {
                 Mut {
+                    on_change: self.on_change,
                     value: self.value,
                     ticks: TicksMut {
                         added: self.ticks.added,
@@ -423,6 +425,7 @@ macro_rules! impl_methods {
             /// ```
             pub fn map_unchanged<U: ?Sized>(self, f: impl FnOnce(&mut $target) -> &mut U) -> Mut<'w, U> {
                 Mut {
+                    on_change: self.on_change,
                     value: f(self.value),
                     ticks: self.ticks,
                     #[cfg(feature = "track_change_detection")]
@@ -437,6 +440,7 @@ macro_rules! impl_methods {
             pub fn filter_map_unchanged<U: ?Sized>(self, f: impl FnOnce(&mut $target) -> Option<&mut U>) -> Option<Mut<'w, U>> {
                 let value = f(self.value);
                 value.map(|value| Mut {
+                    on_change: self.on_change,
                     value,
                     ticks: self.ticks,
                     #[cfg(feature = "track_change_detection")]
@@ -659,21 +663,30 @@ where
 
 change_detection_impl!(ResMut<'w, T>, T, Resource);
 change_detection_mut_impl!(ResMut<'w, T>, T, Resource);
-impl_methods!(ResMut<'w, T>, T, Resource);
+// impl_methods!(ResMut<'w, T>, T, Resource);
 impl_debug!(ResMut<'w, T>, Resource);
 
-impl<'w, T: Resource> From<ResMut<'w, T>> for Mut<'w, T> {
-    /// Convert this `ResMut` into a `Mut`. This allows keeping the change-detection feature of `Mut`
-    /// while losing the specificity of `ResMut` for resources.
-    fn from(other: ResMut<'w, T>) -> Mut<'w, T> {
-        Mut {
-            value: other.value,
-            ticks: other.ticks,
-            #[cfg(feature = "track_change_detection")]
-            changed_by: other.changed_by,
-        }
+impl<'w, T: ?Sized + Resource>  ResMut<'w, T> {
+
+    /// TODO
+    pub fn into_inner(mut self) -> &'w mut T {
+        self.set_changed();
+        self.value
     }
 }
+
+// impl<'w, T: Resource> From<ResMut<'w, T>> for Mut<'w, T> {
+//     /// Convert this `ResMut` into a `Mut`. This allows keeping the change-detection feature of `Mut`
+//     /// while losing the specificity of `ResMut` for resources.
+//     fn from(other: ResMut<'w, T>) -> Mut<'w, T> {
+//         Mut {
+//             value: other.value,
+//             ticks: other.ticks,
+//             #[cfg(feature = "track_change_detection")]
+//             changed_by: other.changed_by,
+//         }
+//     }
+// }
 
 /// Unique borrow of a non-[`Send`] resource.
 ///
@@ -695,21 +708,21 @@ pub struct NonSendMut<'w, T: ?Sized + 'static> {
 
 change_detection_impl!(NonSendMut<'w, T>, T,);
 change_detection_mut_impl!(NonSendMut<'w, T>, T,);
-impl_methods!(NonSendMut<'w, T>, T,);
+// impl_methods!(NonSendMut<'w, T>, T,);
 impl_debug!(NonSendMut<'w, T>,);
 
-impl<'w, T: 'static> From<NonSendMut<'w, T>> for Mut<'w, T> {
-    /// Convert this `NonSendMut` into a `Mut`. This allows keeping the change-detection feature of `Mut`
-    /// while losing the specificity of `NonSendMut`.
-    fn from(other: NonSendMut<'w, T>) -> Mut<'w, T> {
-        Mut {
-            value: other.value,
-            ticks: other.ticks,
-            #[cfg(feature = "track_change_detection")]
-            changed_by: other.changed_by,
-        }
-    }
-}
+// impl<'w, T: 'static> From<NonSendMut<'w, T>> for Mut<'w, T> {
+//     /// Convert this `NonSendMut` into a `Mut`. This allows keeping the change-detection feature of `Mut`
+//     /// while losing the specificity of `NonSendMut`.
+//     fn from(other: NonSendMut<'w, T>) -> Mut<'w, T> {
+//         Mut {
+//             value: other.value,
+//             ticks: other.ticks,
+//             #[cfg(feature = "track_change_detection")]
+//             changed_by: other.changed_by,
+//         }
+//     }
+// }
 
 /// Shared borrow of an entity's component with access to change detection.
 /// Similar to [`Mut`] but is immutable and so doesn't require unique access.
@@ -869,6 +882,7 @@ impl_debug!(Ref<'w, T>,);
 /// # fn update_player_position(player: &Player, new_position: Position) {}
 /// ```
 pub struct Mut<'w, T: ?Sized> {
+    pub(crate) on_change: Option<(EntityChange, &'w Changes)>,
     pub(crate) value: &'w mut T,
     pub(crate) ticks: TicksMut<'w>,
     #[cfg(feature = "track_change_detection")]
@@ -900,6 +914,7 @@ impl<'w, T: ?Sized> Mut<'w, T> {
         #[cfg(feature = "track_change_detection")] caller: &'w mut &'static Location<'static>,
     ) -> Self {
         Self {
+            on_change: None,
             value,
             ticks: TicksMut {
                 added,
@@ -949,8 +964,58 @@ where
     }
 }
 
+impl<'w, T: ?Sized> DetectChangesMut for Mut<'w, T> {
+    type Inner = T;
+    #[inline]
+    #[track_caller]
+    fn set_changed(&mut self) {
+        *self.ticks.changed = self.ticks.this_run;
+        if let Some((change, changes)) = self.on_change {
+            changes.push(change);
+        }
+        #[cfg(feature = "track_change_detection")]
+        {
+            *self.changed_by = Location::caller();
+        }
+    }
+    #[inline]
+    #[track_caller]
+    fn set_last_changed(&mut self, last_changed: Tick) {
+        *self.ticks.changed = last_changed;
+        #[cfg(feature = "track_change_detection")]
+        {
+            *self.changed_by = Location::caller();
+        }
+    }
+
+    #[inline]
+    fn bypass_change_detection(&mut self) -> &mut Self::Inner {
+        self.value
+    }
+}
+
+impl<'w, T: ?Sized> DerefMut for Mut<'w, T> {
+    #[inline]
+    #[track_caller]
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        self.set_changed();
+        #[cfg(feature = "track_change_detection")]
+        {
+            *self.changed_by = Location::caller();
+        }
+        self.value
+    }
+}
+
+impl<'w, T: ?Sized> AsMut<T> for Mut<'w, T> {
+    #[inline]
+    fn as_mut(&mut self) -> &mut T {
+        self.deref_mut()
+    }
+}
+
 change_detection_impl!(Mut<'w, T>, T,);
-change_detection_mut_impl!(Mut<'w, T>, T,);
+// change_detection_mut_impl!(Mut<'w, T>, T,);
 impl_methods!(Mut<'w, T>, T,);
 impl_debug!(Mut<'w, T>,);
 
@@ -1041,6 +1106,7 @@ impl<'w> MutUntyped<'w> {
     /// ```
     pub fn map_unchanged<T: ?Sized>(self, f: impl FnOnce(PtrMut<'w>) -> &'w mut T) -> Mut<'w, T> {
         Mut {
+            on_change: None, // TODO
             value: f(self.value),
             ticks: self.ticks,
             #[cfg(feature = "track_change_detection")]
@@ -1054,6 +1120,7 @@ impl<'w> MutUntyped<'w> {
     /// - `T` must be the erased pointee type for this [`MutUntyped`].
     pub unsafe fn with_type<T>(self) -> Mut<'w, T> {
         Mut {
+            on_change: None,
             // SAFETY: `value` is `Aligned` and caller ensures the pointee type is `T`.
             value: unsafe { self.value.deref_mut() },
             ticks: self.ticks,
@@ -1423,6 +1490,7 @@ mod tests {
         let mut caller = Location::caller();
 
         let ptr = Mut {
+            on_change: None,
             value: &mut outer,
             ticks,
             #[cfg(feature = "track_change_detection")]
@@ -1551,6 +1619,7 @@ mod tests {
         let mut caller = Location::caller();
 
         let mut_typed = Mut {
+            on_change: None,
             value: &mut c,
             ticks,
             #[cfg(feature = "track_change_detection")]
