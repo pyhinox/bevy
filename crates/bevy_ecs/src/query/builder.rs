@@ -5,7 +5,7 @@ use crate::{
     prelude::*,
 };
 
-use super::{FilteredAccess, QueryData, QueryFilter};
+use super::{FilteredAccess, MutateAccess, QueryData, QueryFilter};
 
 /// Builder struct to create [`QueryState`] instances at runtime.
 ///
@@ -37,6 +37,7 @@ use super::{FilteredAccess, QueryData, QueryFilter};
 /// ```
 pub struct QueryBuilder<'w, D: QueryData = (), F: QueryFilter = ()> {
     access: FilteredAccess<ComponentId>,
+    mutate_access: MutateAccess<ComponentId>,
     world: &'w mut World,
     or: bool,
     first: bool,
@@ -50,13 +51,15 @@ impl<'w, D: QueryData, F: QueryFilter> QueryBuilder<'w, D, F> {
         let filter_state = F::init_state(world);
 
         let mut access = FilteredAccess::default();
-        D::update_component_access(&fetch_state, &mut access);
+        let mut mutate_access = MutateAccess::default();
+        D::update_component_access(&fetch_state, &mut access, &mut mutate_access);
 
         // Use a temporary empty FilteredAccess for filters. This prevents them from conflicting with the
         // main Query's `fetch_state` access. Filters are allowed to conflict with the main query fetch
         // because they are evaluated *before* a specific reference is constructed.
         let mut filter_access = FilteredAccess::default();
-        F::update_component_access(&filter_state, &mut filter_access);
+        let mut just_ignore_it = MutateAccess::default();
+        F::update_component_access(&filter_state, &mut filter_access, &mut just_ignore_it);
 
         // Merge the temporary filter access with the main access. This ensures that filter access is
         // properly considered in a global "cross-query" context (both within systems and across systems).
@@ -64,6 +67,7 @@ impl<'w, D: QueryData, F: QueryFilter> QueryBuilder<'w, D, F> {
 
         Self {
             access,
+            mutate_access,
             world,
             or: false,
             first: false,
@@ -124,7 +128,7 @@ impl<'w, D: QueryData, F: QueryFilter> QueryBuilder<'w, D, F> {
     pub fn data<T: QueryData>(&mut self) -> &mut Self {
         let state = T::init_state(self.world);
         let mut access = FilteredAccess::default();
-        T::update_component_access(&state, &mut access);
+        T::update_component_access(&state, &mut access, &mut self.mutate_access);
         self.extend_access(access);
         self
     }
@@ -133,7 +137,8 @@ impl<'w, D: QueryData, F: QueryFilter> QueryBuilder<'w, D, F> {
     pub fn filter<T: QueryFilter>(&mut self) -> &mut Self {
         let state = T::init_state(self.world);
         let mut access = FilteredAccess::default();
-        T::update_component_access(&state, &mut access);
+        let mut just_ignore_it = MutateAccess::default();
+        T::update_component_access(&state, &mut access, &mut just_ignore_it);
         self.extend_access(access);
         self
     }
@@ -255,8 +260,9 @@ impl<'w, D: QueryData, F: QueryFilter> QueryBuilder<'w, D, F> {
         NewD::set_access(&mut fetch_state, &self.access);
 
         let mut access = FilteredAccess::default();
-        NewD::update_component_access(&fetch_state, &mut access);
-        NewF::update_component_access(&filter_state, &mut access);
+        let mut mutate_access = MutateAccess::default();
+        NewD::update_component_access(&fetch_state, &mut access, &mut mutate_access);
+        NewF::update_component_access(&filter_state, &mut access, &mut mutate_access);
 
         self.extend_access(access);
         // SAFETY:

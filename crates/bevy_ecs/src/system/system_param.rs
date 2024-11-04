@@ -28,7 +28,7 @@ use core::{
     marker::PhantomData,
     ops::{Deref, DerefMut},
 };
-
+use crate::world::{ON_ADD, ON_MUTATE};
 use super::Populated;
 
 /// A parameter that can be used in a [`System`](super::System).
@@ -297,6 +297,9 @@ unsafe impl<D: QueryData + 'static, F: QueryFilter + 'static> SystemParam for Qu
     fn init_state(world: &mut World, system_meta: &mut SystemMeta) -> Self::State {
         let state = QueryState::new_with_access(world, &mut system_meta.archetype_component_access);
         init_query_param(world, system_meta, &state);
+        if !state.mutate_component_access.is_empty() {
+            system_meta.set_has_deferred();
+        }
         state
     }
 
@@ -306,6 +309,16 @@ unsafe impl<D: QueryData + 'static, F: QueryFilter + 'static> SystemParam for Qu
         system_meta: &mut SystemMeta,
     ) {
         state.new_archetype(archetype, &mut system_meta.archetype_component_access);
+    }
+
+    fn apply(state: &mut Self::State, system_meta: &SystemMeta, world: &mut World) {
+        let Some(observers) = world.observers.try_get_observers(ON_MUTATE) else {
+            return;
+        };
+        let mut deferred_world = DeferredWorld::from(world);
+        state.mutate_component_access.access().cloned().for_each(|component_id| {
+
+        });
     }
 
     #[inline]

@@ -16,10 +16,7 @@ use bevy_utils::tracing::Span;
 use core::{borrow::Borrow, fmt, mem::MaybeUninit, ptr};
 use fixedbitset::FixedBitSet;
 
-use super::{
-    NopWorldQuery, QueryBuilder, QueryData, QueryEntityError, QueryFilter, QueryManyIter,
-    QuerySingleError, ROQueryItem,
-};
+use super::{MutateAccess, NopWorldQuery, QueryBuilder, QueryData, QueryEntityError, QueryFilter, QueryManyIter, QuerySingleError, ROQueryItem};
 
 /// An ID for either a table or an archetype. Used for Query iteration.
 ///
@@ -76,6 +73,9 @@ pub struct QueryState<D: QueryData, F: QueryFilter = ()> {
     pub(super) is_dense: bool,
     pub(crate) fetch_state: D::State,
     pub(crate) filter_state: F::State,
+
+    /// [`MutateAccess`] Use to record the mutate access which the query have.
+    pub(crate) mutate_component_access: MutateAccess<ComponentId>,
     #[cfg(feature = "trace")]
     par_iter_span: Span,
 }
@@ -188,13 +188,15 @@ impl<D: QueryData, F: QueryFilter> QueryState<D, F> {
         let filter_state = F::init_state(world);
 
         let mut component_access = FilteredAccess::default();
-        D::update_component_access(&fetch_state, &mut component_access);
+        let mut mutate_component_access = MutateAccess::default();
+        D::update_component_access(&fetch_state, &mut component_access, &mut mutate_component_access);
 
         // Use a temporary empty FilteredAccess for filters. This prevents them from conflicting with the
         // main Query's `fetch_state` access. Filters are allowed to conflict with the main query fetch
         // because they are evaluated *before* a specific reference is constructed.
         let mut filter_component_access = FilteredAccess::default();
-        F::update_component_access(&filter_state, &mut filter_component_access);
+        let mut just_ignore_it = MutateAccess::default();
+        F::update_component_access(&filter_state, &mut filter_component_access, &mut just_ignore_it);
 
         // Merge the temporary filter access with the main access. This ensures that filter access is
         // properly considered in a global "cross-query" context (both within systems and across systems).
@@ -214,6 +216,7 @@ impl<D: QueryData, F: QueryFilter> QueryState<D, F> {
             component_access,
             matched_tables: Default::default(),
             matched_archetypes: Default::default(),
+            mutate_component_access,
             #[cfg(feature = "trace")]
             par_iter_span: bevy_utils::tracing::info_span!(
                 "par_for_each",
@@ -240,6 +243,7 @@ impl<D: QueryData, F: QueryFilter> QueryState<D, F> {
             component_access: builder.access().clone(),
             matched_tables: Default::default(),
             matched_archetypes: Default::default(),
+            mutate_component_access: MutateAccess::default(), // TODO
             #[cfg(feature = "trace")]
             par_iter_span: bevy_utils::tracing::info_span!(
                 "par_for_each",
@@ -577,14 +581,17 @@ impl<D: QueryData, F: QueryFilter> QueryState<D, F> {
         self.validate_world(world.id());
 
         let mut component_access = FilteredAccess::default();
+        let mut mutate_component_access = MutateAccess::default();
         let mut fetch_state = NewD::get_state(world.components()).expect("Could not create fetch_state, Please initialize all referenced components before transmuting.");
         let filter_state = NewF::get_state(world.components()).expect("Could not create filter_state, Please initialize all referenced components before transmuting.");
 
+        /// TODO
         NewD::set_access(&mut fetch_state, &self.component_access);
-        NewD::update_component_access(&fetch_state, &mut component_access);
+        NewD::update_component_access(&fetch_state, &mut component_access, &mut mutate_component_access);
 
         let mut filter_component_access = FilteredAccess::default();
-        NewF::update_component_access(&filter_state, &mut filter_component_access);
+        let mut just_ignore_it = MutateAccess::default();
+        NewF::update_component_access(&filter_state, &mut filter_component_access, &mut just_ignore_it);
 
         component_access.extend(&filter_component_access);
         assert!(
@@ -603,6 +610,7 @@ impl<D: QueryData, F: QueryFilter> QueryState<D, F> {
             component_access: self.component_access.clone(),
             matched_tables: self.matched_tables.clone(),
             matched_archetypes: self.matched_archetypes.clone(),
+            mutate_component_access,
             #[cfg(feature = "trace")]
             par_iter_span: bevy_utils::tracing::info_span!(
                 "par_for_each",
@@ -665,16 +673,19 @@ impl<D: QueryData, F: QueryFilter> QueryState<D, F> {
         self.validate_world(world.id());
 
         let mut component_access = FilteredAccess::default();
+        /// TODO
+        let mut mutate_component_access = MutateAccess::default();
         let mut new_fetch_state = NewD::get_state(world.components())
             .expect("Could not create fetch_state, Please initialize all referenced components before transmuting.");
         let new_filter_state = NewF::get_state(world.components())
             .expect("Could not create filter_state, Please initialize all referenced components before transmuting.");
 
         NewD::set_access(&mut new_fetch_state, &self.component_access);
-        NewD::update_component_access(&new_fetch_state, &mut component_access);
+        NewD::update_component_access(&new_fetch_state, &mut component_access, &mut mutate_component_access);
 
         let mut new_filter_component_access = FilteredAccess::default();
-        NewF::update_component_access(&new_filter_state, &mut new_filter_component_access);
+        let mut just_ignore_it = MutateAccess::default();
+        NewF::update_component_access(&new_filter_state, &mut new_filter_component_access, &mut just_ignore_it);
 
         component_access.extend(&new_filter_component_access);
 
@@ -725,6 +736,7 @@ impl<D: QueryData, F: QueryFilter> QueryState<D, F> {
             component_access: joined_component_access,
             matched_tables,
             matched_archetypes,
+            mutate_component_access,
             #[cfg(feature = "trace")]
             par_iter_span: bevy_utils::tracing::info_span!(
                 "par_for_each",

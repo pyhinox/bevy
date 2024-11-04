@@ -14,6 +14,8 @@ pub const ON_REPLACE: ComponentId = ComponentId::new(2);
 /// [`ComponentId`] for [`OnRemove`]
 pub const ON_REMOVE: ComponentId = ComponentId::new(3);
 
+pub const ON_MUTATE: ComponentId = ComponentId::new(4);
+
 /// Trigger emitted when a component is added to an entity. See [`crate::component::ComponentHooks::on_add`]
 /// for more information.
 #[derive(Event, Debug)]

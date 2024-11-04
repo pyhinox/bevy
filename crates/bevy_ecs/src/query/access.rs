@@ -1,5 +1,5 @@
 use crate::component::ComponentId;
-use crate::storage::SparseSetIndex;
+use crate::storage::{SparseSet, SparseSetIndex};
 use crate::world::World;
 use core::{fmt, fmt::Debug, marker::PhantomData};
 use derive_more::derive::From;
@@ -1320,6 +1320,40 @@ impl<T: SparseSetIndex> Default for FilteredAccessSet<T> {
         }
     }
 }
+
+#[derive(Debug)]
+pub struct MutateAccess<T: SparseSetIndex + 'static> {
+    is_access_all: bool,
+    access_set:    SparseSet<T, T>,
+}
+
+impl<T: SparseSetIndex + 'static> Default for MutateAccess<T> {
+    fn default() -> Self {
+        Self {
+            is_access_all: false,
+            access_set: SparseSet::new(),
+        }
+    }
+}
+
+impl <T: SparseSetIndex + 'static> MutateAccess<T> {
+    pub fn add(&mut self, i: T) {
+        self.access_set.insert(i.clone(), i);
+    }
+
+    pub fn add_all(&mut self) {
+        self.is_access_all = true;
+    }
+
+    pub fn access(&self) -> impl Iterator<Item = &T> {
+        self.access_set.values()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        !self.is_access_all && self.access_set.is_empty()
+    }
+}
+
 
 #[cfg(test)]
 mod tests {

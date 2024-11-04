@@ -7,6 +7,7 @@ use crate::{
     world::{unsafe_world_cell::UnsafeWorldCell, World},
 };
 use bevy_utils::all_tuples;
+use crate::query::MutateAccess;
 
 /// Types that can be used as parameters in a [`Query`].
 /// Types that implement this should also implement either [`QueryData`] or [`QueryFilter`]
@@ -127,7 +128,7 @@ pub unsafe trait WorldQuery {
     /// Used to check which queries are disjoint and can run in parallel
     // This does not have a default body of `{}` because 99% of cases need to add accesses
     // and forgetting to do so would be unsound.
-    fn update_component_access(state: &Self::State, access: &mut FilteredAccess<ComponentId>);
+    fn update_component_access(state: &Self::State, access: &mut FilteredAccess<ComponentId>, mutate: &mut MutateAccess<ComponentId>);
 
     /// Creates and initializes a [`State`](WorldQuery::State) for this [`WorldQuery`] type.
     fn init_state(world: &mut World) -> Self::State;
@@ -219,9 +220,9 @@ macro_rules! impl_tuple_world_query {
                 ($(unsafe { $name::fetch($name, _entity, _table_row) },)*)
             }
 
-            fn update_component_access(state: &Self::State, _access: &mut FilteredAccess<ComponentId>) {
+            fn update_component_access(state: &Self::State, _access: &mut FilteredAccess<ComponentId>, _mutate: &mut MutateAccess<ComponentId>) {
                 let ($($name,)*) = state;
-                $($name::update_component_access($name, _access);)*
+                $($name::update_component_access($name, _access, _mutate);)*
             }
             #[allow(unused_variables)]
             fn init_state(world: &mut World) -> Self::State {

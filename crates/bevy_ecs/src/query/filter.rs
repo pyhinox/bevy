@@ -9,6 +9,7 @@ use crate::{
 use bevy_ptr::{ThinSlicePtr, UnsafeCellDeref};
 use bevy_utils::all_tuples;
 use core::{cell::UnsafeCell, marker::PhantomData};
+use crate::query::MutateAccess;
 
 /// Types that filter the results of a [`Query`].
 ///
@@ -186,7 +187,7 @@ unsafe impl<T: Component> WorldQuery for With<T> {
     }
 
     #[inline]
-    fn update_component_access(&id: &ComponentId, access: &mut FilteredAccess<ComponentId>) {
+    fn update_component_access(&id: &ComponentId, access: &mut FilteredAccess<ComponentId>, _mutate_access: &mut MutateAccess<ComponentId>) {
         access.and_with(id);
     }
 
@@ -297,7 +298,7 @@ unsafe impl<T: Component> WorldQuery for Without<T> {
     }
 
     #[inline]
-    fn update_component_access(&id: &ComponentId, access: &mut FilteredAccess<ComponentId>) {
+    fn update_component_access(&id: &ComponentId, access: &mut FilteredAccess<ComponentId>, _mutate_access: &mut MutateAccess<ComponentId>) {
         access.and_without(id);
     }
 
@@ -462,7 +463,7 @@ macro_rules! impl_or_query_filter {
                 false $(|| ($filter.matches && unsafe { $filter::filter_fetch(&mut $filter.fetch, _entity, _table_row) }))*
             }
 
-            fn update_component_access(state: &Self::State, access: &mut FilteredAccess<ComponentId>) {
+            fn update_component_access(state: &Self::State, access: &mut FilteredAccess<ComponentId>, _mutate_access: &mut MutateAccess<ComponentId>) {
                 let ($($filter,)*) = state;
 
                 let mut _new_access = FilteredAccess::matches_nothing();
@@ -471,7 +472,10 @@ macro_rules! impl_or_query_filter {
                     // Create an intermediate because `access`'s value needs to be preserved
                     // for the next filter, and `_new_access` has to be modified only by `append_or` to it.
                     let mut intermediate = access.clone();
-                    $filter::update_component_access($filter, &mut intermediate);
+
+                    // Query won't mutate component in [`QueryFilter`], so just ignore this [`MutateAccess`]
+                    let mut mutate_access = MutateAccess::default();
+                    $filter::update_component_access($filter, &mut intermediate, &mut mutate_access);
                     _new_access.append_or(&intermediate);
                     // Also extend the accesses required to compute the filter. This is required because
                     // otherwise a `Query<(), Or<(Changed<Foo>,)>` won't conflict with `Query<&mut Foo>`.
@@ -752,7 +756,7 @@ unsafe impl<T: Component> WorldQuery for Added<T> {
     }
 
     #[inline]
-    fn update_component_access(&id: &ComponentId, access: &mut FilteredAccess<ComponentId>) {
+    fn update_component_access(&id: &ComponentId, access: &mut FilteredAccess<ComponentId>, _mutate_access: &mut MutateAccess<ComponentId>) {
         if access.access().has_component_write(id) {
             panic!("$state_name<{}> conflicts with a previous access in this query. Shared access cannot coincide with exclusive access.",core::any::type_name::<T>());
         }
@@ -985,7 +989,7 @@ unsafe impl<T: Component> WorldQuery for Changed<T> {
     }
 
     #[inline]
-    fn update_component_access(&id: &ComponentId, access: &mut FilteredAccess<ComponentId>) {
+    fn update_component_access(&id: &ComponentId, access: &mut FilteredAccess<ComponentId>, _mutate_access: &mut MutateAccess<ComponentId>) {
         if access.access().has_component_write(id) {
             panic!("$state_name<{}> conflicts with a previous access in this query. Shared access cannot coincide with exclusive access.",core::any::type_name::<T>());
         }
